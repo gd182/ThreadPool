@@ -34,6 +34,15 @@ void task_with_exception(int thread_id) {
     throw std::runtime_error("Test exception from thread " + std::to_string(thread_id));
 }
 
+/**
+ * @brief Function with priority demonstration
+ * @brief Функция для демонстрации приоритетов
+ */
+void priority_task(int thread_id, const std::string& message, int priority) {
+    std::cout << "Thread " << thread_id << " [Priority " << priority << "]: " << message << std::endl;
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+}
+
 int main() {
     setlocale(LC_ALL, "Russian");
     std::cout << "=== COMPREHENSIVE THREADPOOL TEST ===\n";
@@ -143,10 +152,29 @@ int main() {
     std::cout << "Idle threads after adding tasks: " << pool.numIdle() << std::endl;
     std::cout << "Бездействующих потоков после добавления задач: " << pool.numIdle() << std::endl;
 
-    // Test 8: Test pop functionality - only when queue is not empty
-    // Тест 8: Тестирование функции pop - только когда очередь не пуста
-    std::cout << "\n8. Testing pop functionality...\n";
-    std::cout << "8. Тестирование функции pop...\n";
+    // Test 8: Test priority queue functionality (if using priority queue)
+    // Тест 8: Тестирование функциональности очереди с приоритетами
+    std::cout << "\n8. Testing priority queue functionality...\n";
+    std::cout << "8. Тестирование функциональности очереди с приоритетами...\n";
+
+    // Create a new pool with priority queue for testing
+    // Создаем новый пул с очередью приоритетов для тестирования
+    tp::ThreadPool priorityPool(2, tp::ThreadPool::TypePool::Priority);
+
+    // Push tasks with different priorities
+    // Добавляем задачи с разными приоритетами
+    priorityPool.push(10, priority_task, "High priority task", 10);
+    priorityPool.push(1, priority_task, "Low priority task", 1);
+    priorityPool.push(5, priority_task, "Medium priority task", 5);
+    priorityPool.push(10, priority_task, "Another high priority", 10);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    priorityPool.stop(true);
+
+    // Test 9: Test pop functionality - only when queue is not empty
+    // Тест 9: Тестирование функции pop - только когда очередь не пуста
+    std::cout << "\n9. Testing pop functionality...\n";
+    std::cout << "9. Тестирование функции pop...\n";
 
     // Wait for queue to be empty first / Сначала ждем пока очередь опустеет
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -171,13 +199,13 @@ int main() {
         std::cerr << "Error in pop: " << e.what() << std::endl;
     }
 
-    // Test 9: Test thread access (with caution)
-    // Тест 9: Тестирование доступа к потокам (с осторожностью)
-    std::cout << "\n9. Testing thread access...\n";
-    std::cout << "9. Тестирование доступа к потокам...\n";
+    // Test 10: Test thread access (with caution)
+    // Тест 10: Тестирование доступа к потокам (с осторожностью)
+    std::cout << "\n10. Testing thread access...\n";
+    std::cout << "10. Тестирование доступа к потокам...\n";
 
     try {
-        auto& thread = pool.get_thread(0);
+        auto& thread = pool.getThread(0);
         std::cout << "Thread 0 ID: " << thread.get_id() << std::endl;
         std::cout << "ID потока 0: " << thread.get_id() << std::endl;
 
@@ -189,10 +217,10 @@ int main() {
         std::cerr << "Thread access error: " << e.what() << std::endl;
     }
 
-    // Test 10: Graceful shutdown
-    // Тест 10: Плавное завершение
-    std::cout << "\n10. Testing graceful shutdown...\n";
-    std::cout << "10. Тестирование плавного завершения...\n";
+    // Test 11: Graceful shutdown
+    // Тест 11: Плавное завершение
+    std::cout << "\n11. Testing graceful shutdown...\n";
+    std::cout << "11. Тестирование плавного завершения...\n";
 
     // Add some final tasks / Добавляем финальные задачи
     for (int i = 0; i < 2; ++i) {

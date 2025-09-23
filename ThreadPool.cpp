@@ -4,16 +4,33 @@
 // CONSTRUCTORS & DESTRUCTOR
 // КОНСТРУКТОРЫ И ДЕСТРУКТОР
 
-tp::ThreadPool::ThreadPool()
+tp::ThreadPool::ThreadPool(TypePool typePool)
 {
-    init();
+    init(typePool);
+
+    // Use hardware concurrency as default thread count
+    // Используем аппаратную параллельность как количество потоков по умолчанию
+    int numThreads = std::thread::hardware_concurrency();
+    if (numThreads == 0) {
+        numThreads = 1; // Fallback if hardware_concurrency returns 0 / Резервный вариант если hardware_concurrency возвращает 0
+    }
+
+    threads.resize(numThreads);
+
+    // Create and configure worker threads
+    // Создание и настройка рабочих потоков
+    for (int i = 0; i < numThreads; ++i)
+    {
+        threads[i].isNotWorking = std::make_shared<std::atomic<bool>>(false);
+        setThread(i);
+    }
 }
 
-tp::ThreadPool::ThreadPool(int numThreads)
+tp::ThreadPool::ThreadPool(unsigned int numThreads, TypePool typePool)
 {
     // Initialize pool state
     // Инициализация состояния пула
-    init();
+    init(typePool);
     threads.resize(numThreads);
 
     // Create and configure worker threads
@@ -77,7 +94,7 @@ void tp::ThreadPool::stop(bool isWait)
     threads.clear();
 }
 
-void tp::ThreadPool::resize(int numThreads)
+void tp::ThreadPool::resize(unsigned int numThreads)
 {
     if (!isStop && !isDone) {
         int oldNumThread = threads.size();
@@ -101,12 +118,11 @@ void tp::ThreadPool::resize(int numThreads)
                 threads[i].thread->detach();
             }
 
-            {
-                // Notify detached threads to stop
-                // Уведомление отсоединенных потоков об остановке
-                std::unique_lock<std::mutex> lock(mutex);
-                cv.notify_all();
-            }
+            // Notify detached threads to stop
+            // Уведомление отсоединенных потоков об остановке
+            std::unique_lock<std::mutex> lock(mutex);
+            cv.notify_all();
+            lock.unlock();
 
             threads.resize(numThreads);
         }
@@ -119,15 +135,33 @@ void tp::ThreadPool::clearQueue()
 
     // Delete all pending tasks to prevent memory leaks
     // Удаление всех ожидающих задач для предотвращения утечек памяти
-    while (queue.pop(fun))
+    while (queue->pop(fun))
         delete fun;
 }
 
 // INTERNAL METHODS
 // ВНУТРЕННИЕ МЕТОДЫ
 
-void tp::ThreadPool::init()
+std::thread& tp::ThreadPool::getThread(int i)
 {
+    if (i < 0 || i >= threads.size()) {
+        throw std::out_of_range("Thread index out of range");
+    }
+    return *this->threads[i].thread;
+}
+
+void tp::ThreadPool::init(TypePool typePool)
+{
+    this->typePool = typePool;
+
+    if (typePool == TypePool::Normal)
+    {
+        queue = std::make_unique <tp::component::NormalQueue<std::function<void(int id)>*>>();
+    }
+    else
+    {
+        queue = std::make_unique <tp::component::PriorityQueue<std::function<void(int id)>*>>();
+    }
     numWaiting = 0;     // No threads waiting initially
     isStop = false;     // Not stopped
     isDone = false;     // Not done
@@ -142,7 +176,7 @@ void tp::ThreadPool::setThread(int ind)
     auto f = [this, ind, flag]() {
         std::atomic<bool>& _flag = *flag;
         std::function<void(int id)>* fun;
-        bool isPop = queue.pop(fun);
+        bool isPop = queue->pop(fun);
 
         // Main worker thread loop
         // Основной цикл рабочего потока
@@ -160,7 +194,7 @@ void tp::ThreadPool::setThread(int ind)
                     (*fun)(ind);
                 }
                 catch (const std::exception& e) {
-                    // тHandle standard exceptions gracefully
+                    // Handle standard exceptions gracefully
                     // Обработка стандартных исключений
                     std::cerr << "Exception in thread " << ind << ": " << e.what() << std::endl;
                 }
@@ -173,7 +207,7 @@ void tp::ThreadPool::setThread(int ind)
                 if (_flag)
                     return;  // Exit if thread should stop
                 else
-                    isPop = queue.pop(fun);
+                    isPop = queue->pop(fun);
             }
 
             // Wait for new tasks when queue is empty
@@ -184,7 +218,7 @@ void tp::ThreadPool::setThread(int ind)
             // Wait for notification or condition change
             // Ожидание уведомления или изменения условия
             cv.wait(lock, [this, &fun, &isPop, &_flag]() {
-                isPop = queue.pop(fun);
+                isPop = queue->pop(fun);
                 return isPop || isDone || _flag;
                 });
 
@@ -206,7 +240,7 @@ void tp::ThreadPool::setThread(int ind)
 std::function<void(int)> tp::ThreadPool::pop()
 {
     std::function<void(int id)>* fun = nullptr;
-    queue.pop(fun);
+    queue->pop(fun);
 
     // Smart pointer for automatic cleanup
     // Умный указатель для автоматической очистки
