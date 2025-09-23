@@ -1,6 +1,6 @@
 # ThreadPool
 
-Библиотека пула потоков с поддержкой асинхронного выполнения задач, динамическим управлением и потокобезопасностью.
+Библиотека пула потоков с поддержкой асинхронного выполнения задач, динамическим управлением, приоритетами и потокобезопасностью.
 
 ## Оглавление
 
@@ -17,6 +17,7 @@
 - **Потокобезопасность** - полная защита мьютексами
 - **Динамическое управление** - изменение размера пула во время выполнения
 - **Асинхронные задачи** - поддержка `std::future` для получения результатов
+- **Приоритеты задач** - поддержка очередей с приоритетами
 - **Обработка исключений** - исключения в задачах не крашат пул
 - **Мониторинг** - отслеживание количества бездействующих потоков
 - **Управление памятью** - автоматическая очистка ресурсов
@@ -35,8 +36,8 @@ void simple_task(int thread_id) {
 }
 
 int main() {
-    // Создаем пул из 4 потоков
-    tp::ThreadPool pool(4);
+    // Создаем пул из 4 потоков с обычной очередью
+    tp::ThreadPool pool(4, tp::ThreadPool::TypePool::Normal);
     
     // Добавляем задачи
     for (int i = 0; i < 10; ++i) {
@@ -80,40 +81,83 @@ int main() {
 }
 ```
 
+### Пример с приоритетами задач
+
+```cpp
+#include "ThreadPool.h"
+#include <iostream>
+
+void high_priority_task(int thread_id) {
+    std::cout << "High priority task executed by thread " << thread_id << std::endl;
+}
+
+void normal_priority_task(int thread_id) {
+    std::cout << "Normal priority task executed by thread " << thread_id << std::endl;
+}
+
+void low_priority_task(int thread_id) {
+    std::cout << "Low priority task executed by thread " << thread_id << std::endl;
+}
+
+int main() {
+    // Создаем пул с очередью приоритетов
+    tp::ThreadPool pool(2, tp::ThreadPool::TypePool::Priority);
+    
+    // Добавляем задачи с разными приоритетами
+    pool.push(10, high_priority_task);    // Высокий приоритет
+    pool.push(0, normal_priority_task);   // Обычный приоритет
+    pool.push(-10, low_priority_task);    // Низкий приоритет
+    
+    // Даем время на выполнение
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    pool.stop(true);
+    return 0;
+}
+```
+
 ## API Документация
 
 ### Основные методы
 
 #### Конструкторы
 ```cpp
-tp::ThreadPool();                          // Пул с количеством потоков по умолчанию
-tp::ThreadPool(int countThreads);          // Пул с указанным количеством потоков
+tp::ThreadPool();                          // Пул с количеством потоков по умолчанию и обычной очередью
+tp::ThreadPool(TypePool typePool);         // Пул с указанным типом очереди
+tp::ThreadPool(unsigned int countThreads, TypePool typePool = TypePool::Normal);
 ```
 
 #### Управление пулом
 ```cpp
-void resize(int countThreads);             // Изменить размер пула
+void resize(unsigned int countThreads);    // Изменить размер пула
 void stop(bool isWait = false);            // Остановить пул (true - плавно)
 void clearQueue();                         // Очистить очередь задач
 int size();                                // Получить текущий размер пула
 int numIdle();                             // Получить количество бездействующих потоков
+TypePool getQueueType() const;             // Получить тип очереди
+bool isRunning() const;                    // Проверить, работает ли пул
+bool isStopped() const;                    // Проверить, остановлен ли пул
 ```
 
 #### Добавление задач
 ```cpp
-// Для функций с параметрами
+// Для функций с параметрами (обычный приоритет)
 template<typename F, typename... Rest>
 auto push(F&& f, Rest&&... rest) -> std::future<decltype(f(0, rest...))>;
 
-// Для функций без параметров
+// Для функций без параметров (обычный приоритет)
 template<typename F>
 auto push(F&& f) -> std::future<decltype(f(0))>;
+
+// Для функций с приоритетом и параметрами
+template<typename F, typename... Rest>
+auto push(int priority, F&& f, Rest&&... rest) -> std::future<decltype(f(0, rest...))>;
 ```
 
 #### Вспомогательные методы
 ```cpp
 std::function<void(int)> pop();            // Извлечь задачу из очереди
-std::thread& get_thread(int i);            // Получить ссылку на поток (с осторожностью!)
+std::thread& getThread(int i);            // Получить ссылку на поток (с осторожностью!)
 ```
 
 ## Примеры использования
@@ -191,6 +235,39 @@ int main() {
 }
 ```
 
+### Использование приоритетов для критических задач
+
+```cpp
+#include "ThreadPool.h"
+#include <iostream>
+
+int main() {
+    // Создаем пул с поддержкой приоритетов
+    tp::ThreadPool pool(2, tp::ThreadPool::TypePool::Priority);
+    
+    // Критическая задача (высокий приоритет)
+    pool.push(100, [](int id) {
+        std::cout << "CRITICAL: Processing urgent task in thread " << id << std::endl;
+    });
+    
+    // Обычные задачи
+    for (int i = 0; i < 5; ++i) {
+        pool.push(0, [](int id) {
+            std::cout << "NORMAL: Processing task in thread " << id << std::endl;
+        });
+    }
+    
+    // Фоновая задача (низкий приоритет)
+    pool.push(-50, [](int id) {
+        std::cout << "BACKGROUND: Processing low priority task in thread " << id << std::endl;
+    });
+    
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    pool.stop(true);
+    return 0;
+}
+```
+
 ### Использование в вашем проекте
 
 1. Скопируйте файлы в ваш проект:
@@ -225,9 +302,10 @@ try {
 ### Рекомендации по использованию
 
 1. **Размер пула**: Используйте `std::thread::hardware_concurrency()` для оптимального размера
-2. **Длительные задачи**: Избегайте очень длительных задач (разбивайте на подзадачи)
-3. **Баланс нагрузки**: Следите за количеством бездействующих потоков `numIdle()`
-4. **Память**: Большое количество задач может потреблять значительную память
+2. **Тип очереди**: Используйте `TypePool::Priority` для задач с разными приоритетами
+3. **Длительные задачи**: Избегайте очень длительных задач (разбивайте на подзадачи)
+4. **Баланс нагрузки**: Следите за количеством бездействующих потоков `numIdle()`
+5. **Память**: Большое количество задач может потреблять значительную память
 
 ### Бенчмарк
 
