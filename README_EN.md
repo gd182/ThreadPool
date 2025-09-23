@@ -1,6 +1,6 @@
 # ThreadPool
 
-A thread pool library with support for asynchronous task execution, dynamic management, and thread safety.
+A thread pool library with support for asynchronous task execution, dynamic management, priorities, and thread safety.
 
 ## Table of Contents
 
@@ -17,6 +17,7 @@ A thread pool library with support for asynchronous task execution, dynamic mana
 - **Thread Safety** - Full mutex protection
 - **Dynamic Management** - Resize pool during runtime
 - **Asynchronous Tasks** - `std::future` support for result retrieval
+- **Task Priorities** - Support for priority-based queues
 - **Exception Handling** - Task exceptions don't crash the pool
 - **Monitoring** - Track number of idle threads
 - **Memory Management** - Automatic resource cleanup
@@ -35,8 +36,8 @@ void simple_task(int thread_id) {
 }
 
 int main() {
-    // Create pool with 4 threads
-    tp::ThreadPool pool(4);
+    // Create pool with 4 threads and normal queue
+    tp::ThreadPool pool(4, tp::ThreadPool::TypePool::Normal);
     
     // Add tasks
     for (int i = 0; i < 10; ++i) {
@@ -80,40 +81,83 @@ int main() {
 }
 ```
 
+### Example with Task Priorities
+
+```cpp
+#include "ThreadPool.h"
+#include <iostream>
+
+void high_priority_task(int thread_id) {
+    std::cout << "High priority task executed by thread " << thread_id << std::endl;
+}
+
+void normal_priority_task(int thread_id) {
+    std::cout << "Normal priority task executed by thread " << thread_id << std::endl;
+}
+
+void low_priority_task(int thread_id) {
+    std::cout << "Low priority task executed by thread " << thread_id << std::endl;
+}
+
+int main() {
+    // Create pool with priority queue
+    tp::ThreadPool pool(2, tp::ThreadPool::TypePool::Priority);
+    
+    // Add tasks with different priorities
+    pool.push(10, high_priority_task);    // High priority
+    pool.push(0, normal_priority_task);   // Normal priority
+    pool.push(-10, low_priority_task);    // Low priority
+    
+    // Give time for execution
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    pool.stop(true);
+    return 0;
+}
+```
+
 ## API Documentation
 
 ### Core Methods
 
 #### Constructors
 ```cpp
-tp::ThreadPool();                          // Default thread count pool
-tp::ThreadPool(int countThreads);          // Pool with specified thread count
+tp::ThreadPool();                          // Default thread count with normal queue
+tp::ThreadPool(TypePool typePool);         // Pool with specified queue type
+tp::ThreadPool(unsigned int countThreads, TypePool typePool = TypePool::Normal);
 ```
 
 #### Pool Management
 ```cpp
-void resize(int countThreads);             // Resize the pool
+void resize(unsigned int countThreads);    // Resize the pool
 void stop(bool isWait = false);            // Stop the pool (true for graceful)
 void clearQueue();                         // Clear task queue
 int size();                                // Get current pool size
 int numIdle();                             // Get number of idle threads
+TypePool getQueueType() const;             // Get queue type
+bool isRunning() const;                    // Check if pool is running
+bool isStopped() const;                    // Check if pool is stopped
 ```
 
 #### Task Submission
 ```cpp
-// For functions with parameters
+// For functions with parameters (normal priority)
 template<typename F, typename... Rest>
 auto push(F&& f, Rest&&... rest) -> std::future<decltype(f(0, rest...))>;
 
-// For functions without parameters
+// For functions without parameters (normal priority)
 template<typename F>
 auto push(F&& f) -> std::future<decltype(f(0))>;
+
+// For functions with priority and parameters
+template<typename F, typename... Rest>
+auto push(int priority, F&& f, Rest&&... rest) -> std::future<decltype(f(0, rest...))>;
 ```
 
 #### Utility Methods
 ```cpp
 std::function<void(int)> pop();            // Pop task from queue
-std::thread& get_thread(int i);            // Get thread reference (use with caution!)
+std::thread& getThread(int i);            // Get thread reference (use with caution!)
 ```
 
 ## Usage Examples
@@ -191,6 +235,39 @@ int main() {
 }
 ```
 
+### Using Priorities for Critical Tasks
+
+```cpp
+#include "ThreadPool.h"
+#include <iostream>
+
+int main() {
+    // Create pool with priority support
+    tp::ThreadPool pool(2, tp::ThreadPool::TypePool::Priority);
+    
+    // Critical task (high priority)
+    pool.push(100, [](int id) {
+        std::cout << "CRITICAL: Processing urgent task in thread " << id << std::endl;
+    });
+    
+    // Normal tasks
+    for (int i = 0; i < 5; ++i) {
+        pool.push(0, [](int id) {
+            std::cout << "NORMAL: Processing task in thread " << id << std::endl;
+        });
+    }
+    
+    // Background task (low priority)
+    pool.push(-50, [](int id) {
+        std::cout << "BACKGROUND: Processing low priority task in thread " << id << std::endl;
+    });
+    
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    pool.stop(true);
+    return 0;
+}
+```
+
 ### Using in Your Project
 
 1. Copy these files to your project:
@@ -225,9 +302,10 @@ try {
 ### Usage Recommendations
 
 1. **Pool Size**: Use `std::thread::hardware_concurrency()` for optimal size
-2. **Long Tasks**: Avoid very long-running tasks (break them into subtasks)
-3. **Load Balancing**: Monitor idle thread count with `numIdle()`
-4. **Memory**: Large number of tasks may consume significant memory
+2. **Queue Type**: Use `TypePool::Priority` for tasks with different priorities
+3. **Long Tasks**: Avoid very long-running tasks (break them into subtasks)
+4. **Load Balancing**: Monitor idle thread count with `numIdle()`
+5. **Memory**: Large number of tasks may consume significant memory
 
 ### Benchmark Example
 
@@ -274,4 +352,4 @@ If you have questions or suggestions for improvement, please create an issue in 
 
 ---
 
-**Note**: This library is intended for educational  purposes. Always test in your environment before using in production.
+**Note**: This library is intended for educational purposes. Always test in your environment before using in production.
